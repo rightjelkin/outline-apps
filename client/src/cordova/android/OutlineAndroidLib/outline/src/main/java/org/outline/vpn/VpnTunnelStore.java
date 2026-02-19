@@ -16,6 +16,9 @@ package org.outline.vpn;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Logger;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -27,6 +30,7 @@ class VpnTunnelStore {
   private static final String TUNNEL_KEY = "connection";
   private static final String TUNNEL_STATUS_KEY = "connectionStatus";
   private static final String TUNNEL_SUPPORTS_UDP = "connectionSupportsUdp";
+  private static final String ALLOWED_APPS_KEY = "allowedApps";
 
   private final SharedPreferences preferences;
 
@@ -87,5 +91,15 @@ class VpnTunnelStore {
   @Deprecated
   public boolean isUdpSupported() {
     return preferences.getBoolean(TUNNEL_SUPPORTS_UDP, false);
+  }
+
+  public void setAllowedApps(Set<String> packageNames) {
+    preferences.edit()
+        .putStringSet(ALLOWED_APPS_KEY, packageNames)
+        .commit();
+  }
+
+  public Set<String> getAllowedApps() {
+    return new HashSet<>(preferences.getStringSet(ALLOWED_APPS_KEY, Collections.emptySet()));
   }
 }

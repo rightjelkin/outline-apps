@@ -64,7 +64,9 @@ public class OutlinePlugin extends CordovaPlugin {
     IS_RUNNING("isRunning"),
     INIT_ERROR_REPORTING("initializeErrorReporting"),
     REPORT_EVENTS("reportEvents"),
-    QUIT("quitApplication");
+    QUIT("quitApplication"),
+    GET_INSTALLED_APPS("getInstalledApps"),
+    SET_ALLOWED_APPS("setAllowedApps");
 
     private final static Map<String, Action> actions = new HashMap<>();
     static {
@@ -235,6 +237,17 @@ public class OutlinePlugin extends CordovaPlugin {
         } else if (Action.REPORT_EVENTS.is(action)) {
           final String uuid = args.getString(0);
           SentryErrorReporter.send(uuid);
+          callback.success();
+        } else if (Action.GET_INSTALLED_APPS.is(action)) {
+          final String appsJson = vpnTunnelService.getInstalledApps();
+          callback.success(appsJson);
+        } else if (Action.SET_ALLOWED_APPS.is(action)) {
+          final JSONArray packagesJson = args.getJSONArray(0);
+          final java.util.ArrayList<String> packages = new java.util.ArrayList<>();
+          for (int i = 0; i < packagesJson.length(); i++) {
+            packages.add(packagesJson.getString(i));
+          }
+          vpnTunnelService.setAllowedApps(packages);
           callback.success();
         } else {
           throw new IllegalArgumentException(

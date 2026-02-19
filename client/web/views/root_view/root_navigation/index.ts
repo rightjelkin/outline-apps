@@ -27,6 +27,7 @@ export class RootNavigation extends LitElement {
   @property({type: String}) align: 'left' | 'right';
   @property({type: String}) dataCollectionPageUrl: string;
   @property({type: Boolean}) showAppearanceView: boolean = false;
+  @property({type: Boolean}) showSplitTunneling: boolean = false;
 
   static styles = css`
     :host {
@@ -240,6 +241,17 @@ export class RootNavigation extends LitElement {
             <md-icon slot="start">language</md-icon>
             ${this.localize('change-language-page-title')}
           </md-list-item>
+          ${this.showSplitTunneling
+            ? html`
+                <md-list-item
+                  @click=${() => this.changePage('split-tunneling')}
+                >
+                  <md-ripple></md-ripple>
+                  <md-icon slot="start">apps</md-icon>
+                  ${this.localize('split-tunneling-page-title')}
+                </md-list-item>
+              `
+            : nothing}
           ${this.showAppearanceView
             ? html`
                 <md-list-item @click=${() => this.changePage('appearance')}>

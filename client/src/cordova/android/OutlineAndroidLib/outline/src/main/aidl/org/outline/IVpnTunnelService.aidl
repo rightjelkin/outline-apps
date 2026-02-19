@@ -60,4 +60,22 @@ interface IVpnTunnelService {
    * @param apiKey Sentry API key.
    */
   void initErrorReporting(String apiKey);
+
+  /**
+   * Returns a JSON string with a list of installed applications.
+   * Each entry contains packageName and label.
+   *
+   * @return JSON array string of installed apps.
+   */
+  String getInstalledApps();
+
+  /**
+   * Sets the list of allowed applications for split tunneling (per-app VPN).
+   * If the list is non-empty, only these apps will route through the VPN.
+   * If the list is empty, all apps route through the VPN (default behavior).
+   * If a tunnel is active, it will be re-established with the new configuration.
+   *
+   * @param packageNames list of package names to allow through VPN.
+   */
+  void setAllowedApps(in List<String> packageNames);
 }

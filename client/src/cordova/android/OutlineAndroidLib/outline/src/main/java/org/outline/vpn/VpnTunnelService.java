@@ -38,10 +38,14 @@ import androidx.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.outline.IVpnTunnelService;
@@ -125,6 +129,16 @@ public class VpnTunnelService extends VpnService {
     @Override
     public void initErrorReporting(String apiKey) {
       VpnTunnelService.this.initErrorReporting(apiKey);
+    }
+
+    @Override
+    public String getInstalledApps() {
+      return VpnTunnelService.this.getInstalledAppsJson();
+    }
+
+    @Override
+    public void setAllowedApps(List<String> packageNames) {
+      VpnTunnelService.this.setAllowedApps(packageNames);
     }
   };
 
@@ -241,15 +255,28 @@ public class VpnTunnelService extends VpnService {
         VpnService.Builder builder =
                 new VpnService.Builder()
                         .setSession(this.getApplicationName())
-                        // Standard MTU.
-                        // TODO(fortuna): consider deriving it from the underlying MTU and selected transport.
                         .setMtu(1500)
-                        // Some random local IP we believe won't conflict.
-                        // TODO(fortuna): dynamically select it.
                         .addAddress("10.111.222.1", 24)
                         .addDnsServer(dnsResolver)
-                        .setBlocking(true)
-                        .addDisallowedApplication(this.getPackageName());
+                        .setBlocking(true);
+
+        // Split tunneling: apply per-app VPN configuration.
+        Set<String> allowedApps = tunnelStore.getAllowedApps();
+        if (allowedApps != null && !allowedApps.isEmpty()) {
+          // Whitelist mode: only selected apps go through VPN.
+          PackageManager pm = getPackageManager();
+          for (String pkg : allowedApps) {
+            try {
+              pm.getPackageInfo(pkg, 0);
+              builder.addAllowedApplication(pkg);
+            } catch (PackageManager.NameNotFoundException e) {
+              LOG.warning(String.format(Locale.ROOT, "Allowed app not installed, skipping: %s", pkg));
+            }
+          }
+        } else {
+          // Default mode: all apps through VPN, except the Outline client itself.
+          builder.addDisallowedApplication(this.getPackageName());
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
           builder.setMetered(false);
@@ -373,6 +400,138 @@ public class VpnTunnelService extends VpnService {
       LOG.info("Remote device closed successfully.");
     }
     this.remoteDevice = null;
+  }
+
+  // Split tunneling
+
+  /** Returns a JSON string with the list of installed user applications. */
+  private String getInstalledAppsJson() {
+    PackageManager pm = getPackageManager();
+    List<ApplicationInfo> apps = pm.getInstalledApplications(0);
+    JSONArray result = new JSONArray();
+    for (ApplicationInfo app : apps) {
+      // Skip system apps that don't have a launcher icon (background services, etc.)
+      if (pm.getLaunchIntentForPackage(app.packageName) == null) {
+        continue;
+      }
+      try {
+        JSONObject appInfo = new JSONObject();
+        appInfo.put("packageName", app.packageName);
+        appInfo.put("label", pm.getApplicationLabel(app).toString());
+        result.put(appInfo);
+      } catch (JSONException e) {
+        LOG.warning(String.format(Locale.ROOT, "Failed to serialize app info: %s", app.packageName));
+      }
+    }
+    return result.toString();
+  }
+
+  /** Saves the allowed apps list and re-establishes the VPN if active. */
+  private void setAllowedApps(List<String> packageNames) {
+    Set<String> allowedApps = new HashSet<>(packageNames);
+    tunnelStore.setAllowedApps(allowedApps);
+    LOG.info(String.format(Locale.ROOT, "Set %d allowed apps for split tunneling", allowedApps.size()));
+    if (this.tunnelConfig != null && this.tunFd != null) {
+      reEstablishVpn();
+    }
+  }
+
+  /**
+   * Re-establishes the VPN TUN interface with updated configuration (e.g. allowed apps).
+   * Keeps the remote device running to minimize disruption.
+   */
+  private synchronized void reEstablishVpn() {
+    LOG.info("Re-establishing VPN with updated configuration.");
+    if (this.tunFd == null) {
+      LOG.warning("No active TUN to re-establish.");
+      return;
+    }
+
+    // Stop traffic relay before closing the old TUN.
+    this.stopRemoteDevice();
+
+    // Close old TUN.
+    try {
+      this.tunFd.close();
+    } catch (IOException e) {
+      LOG.severe("Failed to close old TUN interface.");
+    }
+    this.tunFd = null;
+
+    // Create new TUN with updated configuration.
+    try {
+      String dnsResolver = "169.254.113.53";
+      VpnService.Builder builder =
+              new VpnService.Builder()
+                      .setSession(this.getApplicationName())
+                      .setMtu(1500)
+                      .addAddress("10.111.222.1", 24)
+                      .addDnsServer(dnsResolver)
+                      .setBlocking(true);
+
+      Set<String> allowedApps = tunnelStore.getAllowedApps();
+      if (allowedApps != null && !allowedApps.isEmpty()) {
+        PackageManager pm = getPackageManager();
+        for (String pkg : allowedApps) {
+          try {
+            pm.getPackageInfo(pkg, 0);
+            builder.addAllowedApplication(pkg);
+          } catch (PackageManager.NameNotFoundException e) {
+            LOG.warning(String.format(Locale.ROOT, "Allowed app not installed, skipping: %s", pkg));
+          }
+        }
+      } else {
+        builder.addDisallowedApplication(this.getPackageName());
+      }
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        builder.setMetered(false);
+      }
+      final ArrayList<Subnet> reservedBypassSubnets = getReservedBypassSubnets();
+      for (Subnet subnet : reservedBypassSubnets) {
+        builder.addRoute(subnet.address, subnet.prefix);
+      }
+      builder.addRoute(dnsResolver, 32);
+      this.tunFd = builder.establish();
+    } catch (Exception e) {
+      LOG.log(Level.SEVERE, "Failed to re-establish VPN", e);
+      broadcastVpnConnectivityChange(TunnelStatus.DISCONNECTED);
+      tearDownActiveTunnel();
+      return;
+    }
+
+    if (this.tunFd == null) {
+      LOG.severe("Failed to re-establish VPN: tunFd is null");
+      broadcastVpnConnectivityChange(TunnelStatus.DISCONNECTED);
+      tearDownActiveTunnel();
+      return;
+    }
+
+    // Reconnect the remote device with the existing tunnel config.
+    final ClientConfig clientConfig = new ClientConfig();
+    clientConfig.setDataDir(this.getFilesDir().getAbsolutePath());
+    final NewClientResult clientResult = clientConfig.new_(tunnelConfig.id, tunnelConfig.transportConfig);
+    if (clientResult.getError() != null) {
+      LOG.log(Level.SEVERE, "Failed to create Outline client during re-establish", clientResult.getError());
+      tearDownActiveTunnel();
+      return;
+    }
+
+    final ConnectRemoteDeviceResult result = Tun2socks.connectRemoteDevice(clientResult.getClient());
+    if (result.getError() != null) {
+      LOG.log(Level.SEVERE, "Failed to reconnect remote device", result.getError());
+      tearDownActiveTunnel();
+      return;
+    }
+    this.remoteDevice = result.getDevice();
+
+    final PlatformError err = Tun2socks.goRelayTraffic(this.tunFd.getFd(), this.remoteDevice);
+    if (err != null) {
+      LOG.log(Level.SEVERE, "Failed to relay traffic after re-establish", err);
+      tearDownActiveTunnel();
+      return;
+    }
+    LOG.info("VPN re-established successfully with updated configuration.");
   }
 
   // Connectivity

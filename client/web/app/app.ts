@@ -204,6 +204,28 @@ export class App {
       );
     }
 
+    // Split tunneling: show only on Android (Cordova).
+    if ('cordova' in window && (window as any).cordova?.platformId === 'android') {
+      this.rootEl.showSplitTunneling = true;
+      const savedApps = this.settings.get(SettingsKey.ALLOWED_APPS);
+      if (savedApps) {
+        try {
+          this.rootEl.allowedApps = JSON.parse(savedApps);
+        } catch (e) {
+          console.warn('Failed to parse saved allowed apps:', e);
+        }
+      }
+      this.rootEl.addEventListener(
+        'AllowedAppsChanged',
+        (event: CustomEvent) => {
+          this.settings.set(
+            SettingsKey.ALLOWED_APPS,
+            JSON.stringify(event.detail.packages)
+          );
+        }
+      );
+    }
+
     // Register handlers for events published to our event queue.
     this.eventQueue.subscribe(
       events.ServerAdded,

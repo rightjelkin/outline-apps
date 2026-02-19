@@ -65,6 +65,8 @@ import '../views/root_view/root_navigation';
 // eslint-disable-next-line n/no-missing-import
 import '../views/appearance_view';
 // eslint-disable-next-line n/no-missing-import
+import '../views/split_tunneling_view';
+// eslint-disable-next-line n/no-missing-import
 import * as i18n from '@outline/infrastructure/i18n';
 import {AppLocalizeBehavior} from '@polymer/app-localize-behavior/app-localize-behavior.js';
 import {PaperMenuButton} from '@polymer/paper-menu-button/paper-menu-button.js';
@@ -364,6 +366,12 @@ export class AppRoot extends mixinBehaviors(
             selected-appearance="[[selectedAppearance]]"
             localize="[[localize]]"
           ></appearance-view>
+          <split-tunneling-view
+            name="split-tunneling"
+            id="splitTunnelingView"
+            localize="[[localize]]"
+            initial-selected-apps="[[allowedApps]]"
+          ></split-tunneling-view>
         </iron-pages>
       </app-header-layout>
 
@@ -373,6 +381,7 @@ export class AppRoot extends mixinBehaviors(
         show-quit="[[shouldShowQuitButton]]"
         data-collection-page-url="https://s3.amazonaws.com/outline-vpn/static_downloads/Outline-Data-Collection-Policy.html"
         show-appearance-view="[[showAppearanceView]]"
+        show-split-tunneling="[[showSplitTunneling]]"
       ></root-navigation>
 
       <add-access-key-dialog
@@ -594,6 +603,14 @@ export class AppRoot extends mixinBehaviors(
       showAppearanceView: {
         type: Boolean,
         value: false,
+      },
+      showSplitTunneling: {
+        type: Boolean,
+        value: false,
+      },
+      allowedApps: {
+        type: Array,
+        value: () => [],
       },
       selectedAppearance: {
         type: String,
